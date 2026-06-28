@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+websockets
+sounddevice
+numpy
+openai-whisper
+sentence-transformers
+faiss-cpu
+torch
+requests

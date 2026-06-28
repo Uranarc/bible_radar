@@ -1,0 +1,688 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>BibleRadar</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;900&family=Source+Serif+4:ital,opsz,wght@0,8..60,300;0,8..60,400;1,8..60,300&display=swap" rel="stylesheet"/>
+<style>
+  :root {
+    --bg:       #0d0f14;
+    --surface:  #13161e;
+    --surface2: #181b25;
+    --border:   #222736;
+    --gold:     #c9a84c;
+    --gold-dim: #7a6228;
+    --text:     #dce1ec;
+    --muted:    #5a6078;
+    --green:    #4caf7a;
+    --red:      #d05454;
+    --blue:     #5b8dee;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Source Serif 4', serif;
+    font-weight: 300;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ── HEADER ── */
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 28px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    flex-shrink: 0;
+  }
+
+  .logo { display: flex; align-items: baseline; gap: 10px; }
+  .logo-text {
+    font-family: 'Cinzel', serif;
+    font-size: 1.4rem;
+    font-weight: 900;
+    letter-spacing: 0.08em;
+    color: var(--gold);
+  }
+  .logo-sub {
+    font-size: 0.7rem;
+    color: var(--muted);
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+  }
+
+  .status-pill {
+    display: flex; align-items: center; gap: 6px;
+    padding: 5px 12px;
+    border-radius: 20px;
+    border: 1px solid var(--border);
+    font-size: 0.7rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    background: var(--bg);
+  }
+  .dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--muted);
+    flex-shrink: 0;
+  }
+  .dot.loading { background: var(--gold);  animation: pulse 1.2s ease-in-out infinite; }
+  .dot.ready   { background: var(--green); }
+  .dot.active  { background: var(--green); animation: pulse 1s ease-in-out infinite; }
+  .dot.error   { background: var(--red); }
+
+  @keyframes pulse {
+    0%,100% { opacity:1; transform:scale(1); }
+    50%     { opacity:.4; transform:scale(.85); }
+  }
+
+  /* ── LAYOUT ── */
+  .main {
+    display: grid;
+    grid-template-columns: 260px 1fr 340px;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  /* ── SIDEBAR: CONFIGURAÇÃO ── */
+  .sidebar {
+    border-right: 1px solid var(--border);
+    padding: 22px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 22px;
+    overflow-y: auto;
+    background: var(--surface);
+  }
+
+  .section-label {
+    font-family: 'Cinzel', serif;
+    font-size: 0.6rem;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 8px;
+  }
+
+  /* Dispositivo */
+  select {
+    width: 100%;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 8px 10px;
+    border-radius: 6px;
+    font-family: 'Source Serif 4', serif;
+    font-size: 0.8rem;
+    appearance: none;
+    cursor: pointer;
+    margin-bottom: 8px;
+  }
+  select:focus { outline: none; border-color: var(--gold-dim); }
+
+  /* Botões */
+  button {
+    cursor: pointer; border: none; border-radius: 6px;
+    font-family: 'Cinzel', serif;
+    font-size: 0.68rem;
+    letter-spacing: 0.1em;
+    padding: 8px 14px;
+    transition: all .2s;
+    width: 100%;
+  }
+  .btn-primary { background: var(--gold); color: #0d0f14; font-weight: 600; }
+  .btn-primary:hover { background: #e0b85a; }
+  .btn-primary:disabled { background: var(--gold-dim); color: #555; cursor: not-allowed; }
+  .btn-danger  { background: transparent; border: 1px solid var(--red); color: var(--red); }
+  .btn-danger:hover { background: var(--red); color: #fff; }
+  .btn-ghost   { background: transparent; border: 1px solid var(--border); color: var(--muted); }
+  .btn-ghost:hover { border-color: var(--muted); color: var(--text); }
+
+  .btn-row { display: flex; gap: 6px; }
+  .btn-row button { flex: 1; }
+
+  /* ── VERSÕES ── */
+  .version-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .version-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--surface2);
+    cursor: pointer;
+    transition: border-color .2s, background .2s;
+    user-select: none;
+  }
+  .version-item:hover { border-color: var(--gold-dim); }
+  .version-item.active { border-color: var(--gold-dim); background: #1e1a0e; }
+  .version-item.loading-ver { opacity: .6; }
+
+  .ver-check {
+    width: 14px; height: 14px;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 9px;
+    color: var(--gold);
+    transition: background .2s, border-color .2s;
+  }
+  .version-item.active .ver-check {
+    background: var(--gold-dim);
+    border-color: var(--gold);
+  }
+
+  .ver-info { flex: 1; min-width: 0; }
+  .ver-id {
+    font-family: 'Cinzel', serif;
+    font-size: 0.72rem;
+    color: var(--gold);
+    letter-spacing: 0.06em;
+  }
+  .ver-label {
+    font-size: 0.7rem;
+    color: var(--muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .ver-badge {
+    font-size: 0.6rem;
+    padding: 2px 5px;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    background: var(--surface);
+    flex-shrink: 0;
+  }
+  .ver-badge.indexed { border-color: var(--green); color: var(--green); }
+  .ver-badge.downloading { border-color: var(--gold-dim); color: var(--gold); animation: pulse 1s ease-in-out infinite; }
+
+  .add-version-hint {
+    font-size: 0.72rem;
+    color: var(--muted);
+    line-height: 1.5;
+    padding: 10px;
+    border: 1px dashed var(--border);
+    border-radius: 6px;
+    text-align: center;
+  }
+  .add-version-hint code {
+    background: var(--surface2);
+    padding: 1px 4px;
+    border-radius: 3px;
+    font-size: 0.7rem;
+    color: var(--blue);
+  }
+
+  /* ── TRANSCRIPT ── */
+  .panel-transcript {
+    padding: 24px 28px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    border-right: 1px solid var(--border);
+    overflow: hidden;
+  }
+
+  .panel-label {
+    font-family: 'Cinzel', serif;
+    font-size: 0.6rem;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  .transcript-box {
+    flex: 1;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 18px 20px;
+    overflow-y: auto;
+  }
+
+  #transcript-content {
+    font-size: 1rem;
+    line-height: 1.8;
+    color: var(--text);
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .new-text { color: var(--gold); animation: fadeIn 3s ease forwards; }
+  @keyframes fadeIn {
+    0%   { color: var(--gold); }
+    100% { color: var(--text); }
+  }
+
+  .placeholder { color: var(--muted); font-style: italic; font-size: .88rem; }
+
+  .transcript-footer {
+    display: flex; justify-content: flex-end;
+  }
+
+  /* ── MATCHES ── */
+  .panel-matches {
+    padding: 24px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    overflow-y: auto;
+  }
+
+  .match-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+    animation: slideIn .3s ease;
+    position: relative;
+    overflow: hidden;
+    transition: border-color .2s;
+  }
+  .match-card:hover { border-color: var(--gold-dim); }
+  .match-card::before {
+    content:''; position:absolute; left:0; top:0; bottom:0; width:3px;
+    background: var(--muted);
+  }
+  .match-card.rank-1::before { background: var(--gold); }
+  .match-card.rank-2::before { background: #8c9ab5; }
+  .match-card.rank-3::before { background: var(--gold-dim); }
+
+  @keyframes slideIn {
+    from { opacity:0; transform:translateX(12px); }
+    to   { opacity:1; transform:translateX(0); }
+  }
+
+  .match-header {
+    display: flex; align-items: baseline;
+    justify-content: space-between;
+    gap: 6px;
+    margin-bottom: 6px;
+  }
+
+  .match-ref {
+    font-family: 'Cinzel', serif;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--gold);
+    letter-spacing: 0.05em;
+  }
+
+  .match-ver-tag {
+    font-size: 0.6rem;
+    padding: 1px 5px;
+    border-radius: 3px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    letter-spacing: 0.06em;
+    font-family: 'Cinzel', serif;
+    flex-shrink: 0;
+  }
+
+  .match-score { font-size: 0.68rem; color: var(--muted); margin-left: auto; }
+
+  .score-bar {
+    height: 2px; background: var(--border); border-radius: 1px;
+    margin-bottom: 8px; overflow: hidden;
+  }
+  .score-fill {
+    height: 100%; border-radius: 1px;
+    background: linear-gradient(90deg, var(--gold-dim), var(--gold));
+    transition: width .5s ease;
+  }
+
+  .match-text {
+    font-size: 0.84rem;
+    line-height: 1.6;
+    color: #9ba3bc;
+    font-style: italic;
+  }
+
+  .no-matches {
+    color: var(--muted); font-style: italic;
+    font-size: .84rem; text-align: center;
+    padding: 40px 16px;
+  }
+
+  /* ── LOADING OVERLAY ── */
+  #loading-overlay {
+    position: fixed; inset: 0;
+    background: rgba(13,15,20,.93);
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    z-index: 999; gap: 16px;
+    backdrop-filter: blur(4px);
+    transition: opacity .5s;
+  }
+  #loading-overlay.hidden { opacity: 0; pointer-events: none; }
+  .spinner {
+    width: 44px; height: 44px;
+    border: 3px solid var(--border);
+    border-top-color: var(--gold);
+    border-radius: 50%;
+    animation: spin .9s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .loading-title { font-family: 'Cinzel', serif; font-size: 1.1rem; color: var(--gold); letter-spacing:.1em; }
+  .loading-sub   { color: var(--muted); font-size: .75rem; letter-spacing:.08em; }
+
+  /* ── SCROLLBAR ── */
+  ::-webkit-scrollbar { width: 5px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<div id="loading-overlay">
+  <div class="spinner"></div>
+  <div class="loading-title">BibleRadar</div>
+  <div class="loading-sub" id="loading-msg">A carregar modelos...</div>
+</div>
+
+<header>
+  <div class="logo">
+    <span class="logo-text">BibleRadar</span>
+    <span class="logo-sub">Deteção de versículos em tempo real</span>
+  </div>
+  <div class="status-pill">
+    <div class="dot loading" id="status-dot"></div>
+    <span id="status-text">A iniciar...</span>
+  </div>
+</header>
+
+<div class="main">
+
+  <!-- ── SIDEBAR ─────────────────────────────────────── -->
+  <div class="sidebar">
+
+    <!-- Dispositivo de áudio -->
+    <div>
+      <div class="section-label">Dispositivo de entrada</div>
+      <select id="device-select">
+        <option value="">— selecionar —</option>
+      </select>
+      <div style="font-size:.7rem;color:var(--muted);line-height:1.5;margin-top:4px">
+        Microfone, VB-Cable, ou qualquer dispositivo de input disponível no sistema.
+      </div>
+    </div>
+
+    <!-- Controles -->
+    <div>
+      <div class="section-label">Controlo</div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <button class="btn-primary" id="btn-start" disabled onclick="startListening()">▶ Iniciar escuta</button>
+        <button class="btn-danger"  id="btn-stop"  style="display:none" onclick="stopListening()">■ Parar</button>
+        <button class="btn-ghost"   onclick="clearBuffer()">↺ Limpar buffer</button>
+      </div>
+    </div>
+
+    <!-- Versões da Bíblia -->
+    <div>
+      <div class="section-label">Versões da Bíblia</div>
+      <div class="version-list" id="version-list">
+        <!-- preenchido via JS -->
+      </div>
+      <div style="margin-top:10px">
+        <div class="add-version-hint">
+          Para adicionar uma versão local, coloca o JSON em
+          <code>bible_cache/</code> e adiciona a entrada em
+          <code>BIBLE_VERSIONS</code> no <code>server.py</code>.
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ── TRANSCRIPT ───────────────────────────────────── -->
+  <div class="panel-transcript">
+    <div class="panel-label">Transcrição ao vivo</div>
+    <div class="transcript-box" id="transcript-box">
+      <div class="placeholder" id="transcript-placeholder">
+        Seleciona um dispositivo e clica em "Iniciar escuta"...
+      </div>
+      <div id="transcript-content" style="display:none"></div>
+    </div>
+    <div class="transcript-footer">
+      <span style="font-size:.7rem;color:var(--muted)" id="buffer-count"></span>
+    </div>
+  </div>
+
+  <!-- ── MATCHES ──────────────────────────────────────── -->
+  <div class="panel-matches" id="matches-panel">
+    <div class="panel-label">Versículos correspondentes</div>
+    <div class="no-matches" id="no-matches-msg">
+      Os versículos mais prováveis aparecerão aqui em tempo real...
+    </div>
+  </div>
+
+</div>
+
+<script>
+const WS_URL = `ws://${location.host}/ws`;
+const API    = `http://${location.host}/api`;
+
+let ws;
+let pollInterval;
+let versionsState = [];
+
+// ── WebSocket ─────────────────────────────────────────────────
+function connectWS() {
+  ws = new WebSocket(WS_URL);
+  ws.onopen = () => console.log('[WS] ligado');
+  ws.onmessage = ({ data }) => {
+    const msg = JSON.parse(data);
+    if      (msg.type === 'connected') { if (msg.ready) onReady(); }
+    else if (msg.type === 'update')   { onUpdate(msg); }
+    else if (msg.type === 'stopped')  { onStopped(); }
+    else if (msg.type === 'cleared')  { clearUI(); }
+  };
+  ws.onclose = () => setTimeout(connectWS, 2000);
+}
+
+// ── Polling de status ─────────────────────────────────────────
+async function pollStatus() {
+  try {
+    const d = await fetch(`${API}/status`).then(r => r.json());
+    populateDevices(d.devices);
+    renderVersions(d.versions);
+    document.getElementById('loading-msg').textContent = d.loadingStatus || '...';
+    if (d.ready) {
+      clearInterval(pollInterval);
+      onReady();
+      if (d.listening) onListening();
+    }
+  } catch {}
+}
+
+function populateDevices(devices) {
+  const sel = document.getElementById('device-select');
+  const prev = sel.value;
+  sel.innerHTML = '<option value="">— selecionar —</option>';
+  devices.forEach(d => {
+    const opt = document.createElement('option');
+    opt.value = d.id;
+    opt.textContent = d.name;
+    if (String(d.id) === prev) opt.selected = true;
+    sel.appendChild(opt);
+  });
+}
+
+// ── Versões ───────────────────────────────────────────────────
+function renderVersions(versions) {
+  versionsState = versions;
+  const list = document.getElementById('version-list');
+  list.innerHTML = '';
+
+  versions.forEach(v => {
+    const item = document.createElement('div');
+    item.className = `version-item ${v.active ? 'active' : ''} ${v.loaded && !v.active ? '' : ''}`;
+    item.dataset.id = v.id;
+
+    const badgeClass  = v.loaded ? 'indexed' : 'downloading';
+    const badgeLabel  = v.loaded ? 'indexado' : 'por carregar';
+
+    item.innerHTML = `
+      <div class="ver-check">${v.active ? '✓' : ''}</div>
+      <div class="ver-info">
+        <div class="ver-id">${v.id.toUpperCase()}</div>
+        <div class="ver-label">${v.label.split('—')[1]?.trim() || v.label}</div>
+      </div>
+      <div class="ver-badge ${badgeClass}">${badgeLabel}</div>
+    `;
+
+    item.onclick = () => toggleVersion(v.id, v.active);
+    list.appendChild(item);
+  });
+}
+
+async function toggleVersion(id, currentlyActive) {
+  const endpoint = currentlyActive ? 'disable' : 'enable';
+  const r = await fetch(`${API}/versions/${id}/${endpoint}`, { method: 'POST' });
+  const d = await r.json();
+  // Re-fetch status para atualizar badges (indexado / por carregar)
+  const status = await fetch(`${API}/status`).then(r => r.json());
+  renderVersions(status.versions);
+}
+
+// ── Estados UI ───────────────────────────────────────────────
+function onReady() {
+  document.getElementById('loading-overlay').classList.add('hidden');
+  setStatus('ready', 'Pronto');
+  document.getElementById('btn-start').disabled = false;
+}
+
+function onListening() {
+  setStatus('active', 'A ouvir...');
+  document.getElementById('btn-start').style.display = 'none';
+  document.getElementById('btn-stop').style.display  = '';
+}
+
+function onStopped() {
+  setStatus('ready', 'Parado');
+  document.getElementById('btn-start').style.display = '';
+  document.getElementById('btn-stop').style.display  = 'none';
+}
+
+// ── Update em tempo real ──────────────────────────────────────
+function onUpdate({ transcript, fullBuffer, matches }) {
+  const placeholder = document.getElementById('transcript-placeholder');
+  const content     = document.getElementById('transcript-content');
+  placeholder.style.display = 'none';
+  content.style.display     = '';
+
+  const span = document.createElement('span');
+  span.className   = 'new-text';
+  span.textContent = ' ' + transcript;
+  content.appendChild(span);
+
+  const box = document.getElementById('transcript-box');
+  box.scrollTop = box.scrollHeight;
+
+  const count = document.getElementById('buffer-count');
+  count.textContent = `${(fullBuffer || '').length} chars no buffer`;
+
+  renderMatches(matches);
+}
+
+function renderMatches(matches) {
+  const panel = document.getElementById('matches-panel');
+  panel.querySelectorAll('.match-card').forEach(el => el.remove());
+
+  const noMsg = document.getElementById('no-matches-msg');
+  if (!matches || matches.length === 0) {
+    noMsg.style.display = '';
+    return;
+  }
+  noMsg.style.display = 'none';
+
+  matches.forEach((m, i) => {
+    const rankClass = i === 0 ? 'rank-1' : i === 1 ? 'rank-2' : i === 2 ? 'rank-3' : '';
+    const pct       = Math.round(m.score * 100);
+    const card      = document.createElement('div');
+    card.className  = `match-card ${rankClass}`;
+    card.innerHTML  = `
+      <div class="match-header">
+        <span class="match-ref">${m.ref}</span>
+        <span class="match-ver-tag">${(m.version || '').toUpperCase()}</span>
+        <span class="match-score">${pct}%</span>
+      </div>
+      <div class="score-bar">
+        <div class="score-fill" style="width:${Math.min(pct,100)}%"></div>
+      </div>
+      <div class="match-text">"${m.text}"</div>
+    `;
+    panel.appendChild(card);
+  });
+}
+
+function clearUI() {
+  const content     = document.getElementById('transcript-content');
+  const placeholder = document.getElementById('transcript-placeholder');
+  content.innerHTML = '';
+  content.style.display     = 'none';
+  placeholder.style.display = '';
+  document.getElementById('buffer-count').textContent = '';
+  const panel = document.getElementById('matches-panel');
+  panel.querySelectorAll('.match-card').forEach(el => el.remove());
+  document.getElementById('no-matches-msg').style.display = '';
+}
+
+// ── Ações ─────────────────────────────────────────────────────
+async function startListening() {
+  const deviceId = document.getElementById('device-select').value;
+  const body     = deviceId !== '' ? { deviceId: Number(deviceId) } : {};
+  const d        = await fetch(`${API}/start`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }).then(r => r.json());
+  if (d.ok) onListening();
+  else alert(d.error);
+}
+
+async function stopListening() {
+  await fetch(`${API}/stop`, { method: 'POST' });
+  onStopped();
+}
+
+async function clearBuffer() {
+  await fetch(`${API}/clear`, { method: 'POST' });
+  clearUI();
+}
+
+function setStatus(state, text) {
+  document.getElementById('status-dot').className  = `dot ${state}`;
+  document.getElementById('status-text').textContent = text;
+}
+
+// ── Init ──────────────────────────────────────────────────────
+connectWS();
+pollInterval = setInterval(pollStatus, 2500);
+pollStatus();
+</script>
+</body>
+</html>
