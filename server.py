@@ -28,28 +28,19 @@ import uvicorn
 # ---------------------------------------------------------------------------
 # CONFIGURAÇÕES GERAIS
 # ---------------------------------------------------------------------------
-SAMPLE_RATE        = 16000   # Hz exigido pelo Whisper
-CHUNK_SECONDS      = 6       # segundos de áudio por chunk
-OVERLAP_SECONDS    = 2       # sobreposição entre chunks
-TOP_K              = 7       # versículos no ranking
-SIMILARITY_THRESHOLD = 0.30  # score mínimo (0-1)
-WHISPER_MODEL      = "small" # tiny | base | small | medium | large
+SAMPLE_RATE          = 16000   # Hz exigido pelo Whisper
+CHUNK_SECONDS        = 6       # segundos de áudio por chunk
+OVERLAP_SECONDS      = 2       # sobreposição entre chunks
+TOP_K                = 7       # versículos no ranking
+SIMILARITY_THRESHOLD = 0.75    # score mínimo (0-1) - padrão 75%
+CONTEXT_WINDOW       = 600     # caracteres para contexto de busca expandido
+WHISPER_MODEL        = "small" # tiny | base | small | medium | large
 
 CACHE_DIR = Path("bible_cache")
 CACHE_DIR.mkdir(exist_ok=True)
 
 # ---------------------------------------------------------------------------
 # CATÁLOGO DE VERSÕES DISPONÍVEIS
-#
-# Para adicionar uma versão com URL:
-#   Adiciona uma entrada com "url" — será descarregada automaticamente.
-#
-# Para adicionar uma versão de um ficheiro local:
-#   1. Coloca o JSON em bible_cache/minha_versao.json
-#   2. Adiciona entrada com "file": "bible_cache/minha_versao.json"
-#
-# Formato esperado: JSON array de livros (formato thiagobodruk/biblia):
-#   [ { "name": "Genesis", "chapters": [ ["verso1", "verso2", ...], ... ] }, ... ]
 # ---------------------------------------------------------------------------
 BIBLE_VERSIONS = {
     "nvi": {
@@ -62,7 +53,7 @@ BIBLE_VERSIONS = {
     },
     "aa": {
         "label": "AA — Almeida Atualizada",
-        "url": "https://raw.githubusercontent.com/thiagobodruk/biblia/master/json/aa.json",
+        "url": "https://raw.githubusercontent.com/thiagobodruk/biblia/refs/heads/master/json/aa.json",
     },
     "naa": {
         "label": "NAA — Nova Almeida Atualizada",
@@ -72,11 +63,6 @@ BIBLE_VERSIONS = {
         "label": "NVT - Nova Versão Transformadora",
         "url": "https://raw.githubusercontent.com/damarals/biblias/refs/heads/main/inst/json/NVT.json"
     },
-    # Exemplo de versão local (descomenta e adapta):
-    # "kjv": {
-    #     "label": "KJV — King James Version (inglês)",
-    #     "file": "bible_cache/kjv.json",
-    # },
 }
 
 BOOK_NAMES_PT = {
@@ -197,6 +183,10 @@ class BibleRadar:
         self.ready              = False
         self.loading_status     = "A iniciar..."
 
+        # Configurações dinâmicas
+        self.similarity_threshold: float = SIMILARITY_THRESHOLD
+        self.context_window: int         = CONTEXT_WINDOW
+
     # ── Carregamento ─────────────────────────────────────────────────────────
 
     def load_models(self):
@@ -237,7 +227,6 @@ class BibleRadar:
         if version_id not in BIBLE_VERSIONS:
             return False
         if version_id not in self.version_data:
-            # carrega em background
             threading.Thread(
                 target=self._load_version_sync, args=(version_id,), daemon=True
             ).start()
@@ -249,27 +238,29 @@ class BibleRadar:
 
     # ── Busca ────────────────────────────────────────────────────────────────
 
-    def search(self, text: str) -> list[dict]:
-        if not text.strip() or not self.active_versions:
+    def search(self, text: str, threshold: Optional[float] = None, top_k: int = TOP_K) -> list[dict]:
+        min_thresh = threshold if threshold is not None else self.similarity_threshold
+        if not text.strip() or not self.active_versions or not self.embed_model:
             return []
+
         emb = self.embed_model.encode(
-            [text], normalize_embeddings=True, convert_to_numpy=True
+            [text.strip()], normalize_embeddings=True, convert_to_numpy=True
         )
         all_results = []
         for vid in list(self.active_versions):
             vdata = self.version_data.get(vid)
             if not vdata:
                 continue
-            scores, idxs = vdata["index"].search(emb, TOP_K)
+            scores, idxs = vdata["index"].search(emb, top_k)
             for score, idx in zip(scores[0], idxs[0]):
-                if score >= SIMILARITY_THRESHOLD and idx >= 0:
+                if score >= min_thresh and idx >= 0:
                     v = vdata["verses"][idx]
                     all_results.append({**v, "score": float(score)})
 
         all_results.sort(key=lambda x: x["score"], reverse=True)
-        return all_results[:TOP_K]
+        return all_results[:top_k]
 
-    # ── WebSocket broadcast ───────────────────────────────────────────────────
+    # ── WebSocket broadcast ──────────────────────────────────────────────────
 
     async def broadcast(self, msg: dict):
         data = json.dumps(msg, ensure_ascii=False)
@@ -285,6 +276,7 @@ class BibleRadar:
 
 radar = BibleRadar()
 app   = FastAPI()
+main_loop = None
 
 # ---------------------------------------------------------------------------
 # ÁUDIO + TRANSCRIÇÃO
@@ -297,14 +289,16 @@ def audio_callback(indata, frames, time_info, status):
 
 
 def transcription_loop():
-    chunk_samples   = int(SAMPLE_RATE * CHUNK_SECONDS)
+    chunk_samples = int(SAMPLE_RATE * CHUNK_SECONDS)
     overlap_samples = int(SAMPLE_RATE * OVERLAP_SECONDS)
-    buffer          = np.zeros(0, dtype=np.float32)
-    loop            = asyncio.new_event_loop()
+
+    buffer = np.zeros(0, dtype=np.float32)
+
+    print("[Transcricao] Thread iniciada.")
 
     while radar.is_listening:
         try:
-            data   = radar.audio_queue.get(timeout=0.5)
+            data = radar.audio_queue.get(timeout=0.5)
             buffer = np.concatenate([buffer, data.flatten()])
         except queue.Empty:
             continue
@@ -312,29 +306,83 @@ def transcription_loop():
         if len(buffer) < chunk_samples:
             continue
 
-        chunk  = buffer[:chunk_samples].copy()
+        chunk = buffer[:chunk_samples].copy()
         buffer = buffer[chunk_samples - overlap_samples:]
 
-        result = radar.whisper_model.transcribe(
-            chunk, language="pt", fp16=False,
-            condition_on_previous_text=True,
-        )
-        text = result["text"].strip()
+        peak = float(np.max(np.abs(chunk)))
+        rms = float(np.sqrt(np.mean(chunk ** 2)))
+
+        if peak < 0.001:
+            print("[Audio] Chunk sem sinal significativo.")
+            continue
+
+        try:
+            result = radar.whisper_model.transcribe(
+                chunk,
+                language="pt",
+                fp16=False,
+                condition_on_previous_text=False,
+            )
+            text = result.get("text", "").strip()
+            print(f"[Whisper] {text!r}")
+        except Exception as exc:
+            import traceback
+            print(f"[Whisper] Erro: {exc}")
+            traceback.print_exc()
+            continue
+
         if not text:
             continue
 
-        radar.transcript_buffer = (radar.transcript_buffer + " " + text).strip()
-        matches = radar.search(radar.transcript_buffer[-200:])
+        radar.transcript_buffer = (
+            radar.transcript_buffer + " " + text
+        ).strip()
 
-        loop.run_until_complete(radar.broadcast({
-            "type":       "update",
-            "transcript": text,
-            "fullBuffer": radar.transcript_buffer[-400:],
-            "matches":    matches,
-            "timestamp":  time.time(),
-        }))
+        # Multi-window search:
+        # 1. Janela curta (últimos ~180 caracteres) para citações diretas
+        # 2. Janela ampla (últimos context_window caracteres) para passagens longas e contexto
+        short_len = 180
+        text_short = radar.transcript_buffer[-short_len:].strip()
+        text_long  = radar.transcript_buffer[-radar.context_window:].strip()
 
-    loop.close()
+        combined_matches: dict[tuple, dict] = {}
+
+        matches_short = radar.search(text_short)
+        for m in matches_short:
+            key = (m["version"], m["ref"])
+            combined_matches[key] = m
+
+        if text_long != text_short:
+            matches_long = radar.search(text_long)
+            for m in matches_long:
+                key = (m["version"], m["ref"])
+                if key not in combined_matches or m["score"] > combined_matches[key]["score"]:
+                    combined_matches[key] = m
+
+        matches = sorted(
+            combined_matches.values(),
+            key=lambda x: x["score"],
+            reverse=True
+        )[:TOP_K]
+
+        if main_loop is not None:
+            future = asyncio.run_coroutine_threadsafe(
+                radar.broadcast({
+                    "type": "update",
+                    "transcript": text,
+                    "fullBuffer": radar.transcript_buffer[-1000:],
+                    "matches": matches,
+                    "timestamp": time.time(),
+                }),
+                main_loop,
+            )
+
+            try:
+                future.result(timeout=10)
+            except Exception as exc:
+                print(f"[WebSocket] Erro no envio: {exc}")
+
+    print("[Transcricao] Thread terminada.")
 
 # ---------------------------------------------------------------------------
 # ENDPOINTS
@@ -342,7 +390,13 @@ def transcription_loop():
 
 @app.on_event("startup")
 async def startup():
-    threading.Thread(target=radar.load_models, daemon=True).start()
+    global main_loop
+    main_loop = asyncio.get_running_loop()
+
+    threading.Thread(
+        target=radar.load_models,
+        daemon=True,
+    ).start()
 
 
 @app.get("/api/status")
@@ -366,13 +420,52 @@ async def api_status():
     ]
 
     return {
-        "ready":          radar.ready,
-        "loadingStatus":  radar.loading_status,
-        "listening":      radar.is_listening,
-        "devices":        devices,
-        "deviceIndex":    radar.device_index,
-        "versions":       versions_info,
-        "activeVersions": list(radar.active_versions),
+        "ready":               radar.ready,
+        "loadingStatus":       radar.loading_status,
+        "listening":           radar.is_listening,
+        "devices":             devices,
+        "deviceIndex":         radar.device_index,
+        "versions":            versions_info,
+        "activeVersions":      list(radar.active_versions),
+        "similarityThreshold": radar.similarity_threshold,
+        "contextWindow":       radar.context_window,
+    }
+
+
+@app.post("/api/settings")
+async def update_settings(body: dict):
+    if "similarityThreshold" in body:
+        thresh = float(body["similarityThreshold"])
+        radar.similarity_threshold = max(0.1, min(1.0, thresh))
+    if "contextWindow" in body:
+        cw = int(body["contextWindow"])
+        radar.context_window = max(100, min(3000, cw))
+
+    return {
+        "ok": True,
+        "similarityThreshold": radar.similarity_threshold,
+        "contextWindow": radar.context_window,
+    }
+
+
+@app.post("/api/search")
+async def manual_search(body: dict):
+    text = body.get("text", "").strip()
+    threshold = body.get("threshold", None)
+    if threshold is not None:
+        try:
+            threshold = float(threshold)
+        except (ValueError, TypeError):
+            threshold = None
+
+    if not text:
+        return {"ok": False, "error": "Texto vazio.", "results": []}
+
+    matches = radar.search(text, threshold=threshold)
+    return {
+        "ok": True,
+        "query": text,
+        "results": matches,
     }
 
 
@@ -391,24 +484,90 @@ async def disable_version(version_id: str):
 @app.post("/api/start")
 async def start_listening(body: dict = {}):
     if not radar.ready:
-        return {"ok": False, "error": "Modelos ainda a carregar..."}
+        return {
+            "ok": False,
+            "error": f"Modelos ainda a carregar: {radar.loading_status}",
+        }
+
     if radar.is_listening:
-        return {"ok": False, "error": "Já está a ouvir"}
-    device_id            = body.get("deviceId", None)
-    radar.device_index   = device_id
-    radar.is_listening   = True
+        return {
+            "ok": False,
+            "error": "Já está a ouvir.",
+        }
+
+    device_id = body.get("deviceId", None)
+
+    try:
+        if device_id is not None:
+            device_id = int(device_id)
+            info = sd.query_devices(device_id)
+
+            if info["max_input_channels"] < 1:
+                return {
+                    "ok": False,
+                    "error": "O dispositivo selecionado não tem entrada de áudio.",
+                }
+
+        sd.check_input_settings(
+            device=device_id,
+            channels=1,
+            dtype="float32",
+            samplerate=SAMPLE_RATE,
+        )
+
+    except Exception as exc:
+        return {
+            "ok": False,
+            "error": f"Configuração de áudio inválida: {exc}",
+        }
+
+    while True:
+        try:
+            radar.audio_queue.get_nowait()
+        except queue.Empty:
+            break
+
+    radar.device_index = device_id
     radar.transcript_buffer = ""
+    radar.is_listening = True
 
     def run():
-        with sd.InputStream(
-            samplerate=SAMPLE_RATE, channels=1, dtype="float32",
-            device=device_id, blocksize=int(SAMPLE_RATE * 0.5),
-            callback=audio_callback,
-        ):
-            transcription_loop()
+        try:
+            print(
+                f"[Audio] A abrir dispositivo {device_id} "
+                f"a {SAMPLE_RATE} Hz."
+            )
 
-    threading.Thread(target=run, daemon=True).start()
-    return {"ok": True}
+            with sd.InputStream(
+                samplerate=SAMPLE_RATE,
+                channels=1,
+                dtype="float32",
+                device=device_id,
+                blocksize=int(SAMPLE_RATE * 0.5),
+                callback=audio_callback,
+            ):
+                print("[Audio] Captura iniciada.")
+                transcription_loop()
+
+        except Exception as exc:
+            import traceback
+            print(f"[Audio] Erro fatal: {exc}")
+            traceback.print_exc()
+
+        finally:
+            radar.is_listening = False
+            print("[Audio] Captura terminada.")
+
+    threading.Thread(
+        target=run,
+        daemon=True,
+    ).start()
+
+    return {
+        "ok": True,
+        "deviceId": device_id,
+        "message": "Pedido de captura aceite; a confirmar nos logs.",
+    }
 
 
 @app.post("/api/stop")

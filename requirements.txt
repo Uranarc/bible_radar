@@ -3,7 +3,7 @@ uvicorn
 websockets
 sounddevice
 numpy
-openai-whisper
+faster-whisper
 sentence-transformers
 faiss-cpu
 torch
