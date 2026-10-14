@@ -301,7 +301,113 @@
     100% { color: var(--text); }
   }
 
-  .placeholder { color: var(--muted); font-style: italic; font-size: .88rem; }
+  .placeholder { color: var(--muted); font-style: italic; font-size: .88rem; line-height: 1.6; }
+
+  /* ── PAINEL DE TESTE / DIGITAÇÃO MANUAL ── */
+  .test-panel {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    flex-shrink: 0;
+  }
+  .test-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .test-pill {
+    background: #252013;
+    border: 1px solid var(--gold-dim);
+    color: var(--gold);
+    font-family: 'Cinzel', serif;
+    font-size: 0.6rem;
+    font-weight: 600;
+    padding: 2px 7px;
+    border-radius: 4px;
+    letter-spacing: 0.08em;
+  }
+  .test-desc {
+    color: var(--muted);
+    font-size: 0.68rem;
+  }
+  .test-checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    cursor: pointer;
+    font-size: 0.67rem;
+    color: var(--muted);
+    user-select: none;
+  }
+  .test-checkbox-label:hover {
+    color: var(--text);
+  }
+  .test-checkbox-label input[type="checkbox"] {
+    accent-color: var(--gold);
+    cursor: pointer;
+  }
+  .test-input-row {
+    display: flex;
+    gap: 8px;
+  }
+  #test-input {
+    flex: 1;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 9px 12px;
+    border-radius: 6px;
+    font-family: 'Source Serif 4', serif;
+    font-size: 0.88rem;
+    transition: border-color .2s;
+  }
+  #test-input:focus {
+    outline: none;
+    border-color: var(--gold);
+  }
+  .test-btn {
+    white-space: nowrap;
+    padding: 0 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+  }
+  .test-presets {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .presets-label {
+    font-size: 0.62rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-family: 'Cinzel', serif;
+  }
+  .chip {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    padding: 3px 9px;
+    border-radius: 12px;
+    font-size: 0.66rem;
+    font-family: 'Source Serif 4', serif;
+    cursor: pointer;
+    transition: all .2s;
+    width: auto;
+  }
+  .chip:hover {
+    border-color: var(--gold-dim);
+    color: var(--gold);
+    background: #1c180e;
+  }
+
   .transcript-footer {
     display: flex; justify-content: space-between; align-items: center;
     font-size: 0.7rem; color: var(--muted);
@@ -554,7 +660,7 @@
 <div id="loading-overlay">
   <div class="spinner"></div>
   <div class="loading-title">BibleRadar</div>
-  <div class="loading-sub" id="loading-msg">A carregar modelos...</div>
+  <div class="loading-sub" id="loading-msg">A carregar modelo semântico...</div>
 </div>
 
 <header>
@@ -575,7 +681,7 @@
 
     <!-- Dispositivo de áudio -->
     <div>
-      <div class="section-label">Dispositivo de entrada</div>
+      <div class="section-label">Dispositivo de entrada (Microfone)</div>
       <select id="device-select">
         <option value="">— selecionar —</option>
       </select>
@@ -583,11 +689,14 @@
 
     <!-- Controles -->
     <div>
-      <div class="section-label">Controlo de Escuta</div>
+      <div class="section-label">Controlo de Escuta (Áudio)</div>
       <div style="display:flex;flex-direction:column;gap:6px">
-        <button class="btn-primary" id="btn-start" disabled onclick="startListening()">▶ Iniciar escuta</button>
+        <button class="btn-primary" id="btn-start" disabled onclick="startListening()">▶ Iniciar escuta (Microfone)</button>
         <button class="btn-danger"  id="btn-stop"  style="display:none" onclick="stopListening()">■ Parar</button>
         <button class="btn-ghost"   onclick="clearBuffer()">↺ Limpar transcrição</button>
+      </div>
+      <div style="font-size:0.65rem;color:var(--muted);margin-top:6px;line-height:1.4">
+        <span style="color:var(--gold)">💡 Modo de Teste:</span> Você pode testar escrevendo no campo de digitação abaixo da transcrição, sem precisar do microfone nem do Whisper.
       </div>
     </div>
 
@@ -630,7 +739,7 @@
   <!-- ── TRANSCRIPT ── -->
   <div class="panel-transcript">
     <div class="transcript-header">
-      <div class="panel-label">Transcriçāo ao vivo</div>
+      <div class="panel-label">Transcrição e Simulação de Fala</div>
       <span style="font-size:.7rem;color:var(--muted)">Selecione qualquer trecho com o rato para pesquisar</span>
     </div>
 
@@ -648,14 +757,54 @@
 
     <div class="transcript-box" id="transcript-box" onmouseup="checkTextSelection()" onkeyup="checkTextSelection()">
       <div class="placeholder" id="transcript-placeholder">
-        Selecione o dispositivo e clique em "Iniciar escuta". As falas transcritas aparecerão aqui em tempo real...
+        ⚡ <strong>Modo de Teste ativo:</strong> digite palavras ou versículos no campo abaixo e clique em <em>"Simular Fala"</em> (ou clique nos exemplos rápidos).<br/><br/>
+        As falas aparecerão aqui e o BibleRadar buscará os versículos correspondentes em tempo real ao lado!
       </div>
       <div id="transcript-content" style="display:none"></div>
     </div>
 
+    <!-- ── MODO DE TESTE / DIGITAÇÃO MANUAL ── -->
+    <div class="test-panel">
+      <div class="test-header">
+        <div style="display:flex;align-items:center;gap:8px">
+          <span class="test-pill">TESTE POR DIGITAÇÃO</span>
+          <span class="test-desc">Escreva palavras para testar sem Whisper e sem sobrecarregar o PC</span>
+        </div>
+        <label class="test-checkbox-label" title="Acumula as frases como se fosse um sermão falado continuamente">
+          <input type="checkbox" id="test-accumulate" checked />
+          <span>Acumular no contexto</span>
+        </label>
+      </div>
+
+      <div class="test-input-row">
+        <input 
+          type="text" 
+          id="test-input" 
+          placeholder="Digite aqui... Ex: Porque Deus amou o mundo de tal maneira..." 
+          onkeydown="if(event.key==='Enter') sendSimulatedText()"
+        />
+        <button class="btn-primary btn-sm test-btn" onclick="sendSimulatedText()" title="Simula fala em tempo real e atualiza os versículos">
+          ⚡ Simular Fala
+        </button>
+        <button class="btn-ghost btn-sm test-btn" onclick="sendDirectSearch()" title="Pesquisa direta sem acumular no histórico">
+          🔍 Busca Direta
+        </button>
+      </div>
+
+      <div class="test-presets">
+        <span class="presets-label">Exemplos rápidos:</span>
+        <button class="chip" onclick="applyPreset('Porque Deus tanto amou o mundo que deu o seu Filho Unigênito')">João 3:16</button>
+        <button class="chip" onclick="applyPreset('O Senhor é o meu pastor, nada me faltará')">Salmos 23:1</button>
+        <button class="chip" onclick="applyPreset('No princípio criou Deus os céus e a terra')">Gênesis 1:1</button>
+        <button class="chip" onclick="applyPreset('Tudo posso naquele que me fortalece')">Filipenses 4:13</button>
+        <button class="chip" onclick="applyPreset('Lâmpada para os meus pés é tua palavra e luz para o meu caminho')">Salmos 119:105</button>
+        <button class="chip" onclick="applyPreset('O amor é paciente, o amor é bondoso. Não inveja, não se vangloria')">1 Coríntios 13:4</button>
+      </div>
+    </div>
+
     <div class="transcript-footer">
       <span id="buffer-count">0 caracteres no buffer</span>
-      <span style="font-size:.65rem;color:var(--muted)">Dica: o sistema pesquisa em janelas curta + ampla simultaneamente</span>
+      <span style="font-size:.65rem;color:var(--muted)">Multi-window: janelas curta (~180 car.) e ampla (~600 car.) simultâneas</span>
     </div>
   </div>
 
@@ -772,8 +921,8 @@ function connectWS() {
 async function pollStatus() {
   try {
     const d = await fetch(`${API}/status`).then(r => r.json());
-    populateDevices(d.devices);
-    renderVersions(d.versions);
+    populateDevices(d.devices || []);
+    renderVersions(d.versions || []);
     document.getElementById('loading-msg').textContent = d.loadingStatus || '...';
 
     if (d.similarityThreshold !== undefined) {
@@ -871,7 +1020,7 @@ function onUpdate({ transcript, fullBuffer, matches }) {
   box.scrollTop = box.scrollHeight;
 
   const count = document.getElementById('buffer-count');
-  count.textContent = `${(fullBuffer || '').length} car. no buffer de áudio`;
+  count.textContent = `${(fullBuffer || '').length} car. no buffer de contexto`;
 
   // Processamento de matches
   if (matches && matches.length > 0) {
@@ -898,8 +1047,6 @@ function onUpdate({ transcript, fullBuffer, matches }) {
       renderLiveMatches();
     }
   } else {
-    // Se o chunk atual não tem matches mas já tínhamos matches anteriores:
-    // NÃO apaga! Mantém na tela e atualiza apenas o aviso de retenção
     if (liveMatches.length > 0 && !isFrozen) {
       updateLiveBanner();
     }
@@ -980,7 +1127,7 @@ function renderSelection() {
   const container = document.getElementById('selection-cards');
   container.innerHTML = '';
   if (selectionMatches.length === 0) {
-    container.innerHTML = '<div class="no-matches">Nenhum versículo com correspondência suficiente para o trecho selecionado.</div>';
+    container.innerHTML = '<div class="no-matches">Nenhum versículo com correspondência suficiente para a consulta.</div>';
     return;
   }
   selectionMatches.forEach((m, i) => {
@@ -988,7 +1135,7 @@ function renderSelection() {
   });
 }
 
-// ── Criação do Card de Versículo ──
+// ── Criação do Card de Versículo ──────────────────────────────────────────
 function createMatchCard(m, rank = 0, options = {}) {
   const isPinned = pinnedMatches.some(p => p.ref === m.ref && p.version === m.version);
   const pct = Math.round(m.score * 100);
@@ -1069,13 +1216,13 @@ function clearPinned() {
 }
 
 function updateCounts() {
-  document.getElementById('count-live').textContent    = liveMatches.length;
-  document.getElementById('count-history').textContent = historyMatches.length;
-  document.getElementById('count-pinned').textContent  = pinnedMatches.length;
+  document.getElementById('count-live').textContent      = liveMatches.length;
+  document.getElementById('count-history').textContent   = historyMatches.length;
+  document.getElementById('count-pinned').textContent    = pinnedMatches.length;
   document.getElementById('count-selection').textContent = selectionMatches.length;
 }
 
-// ── Congelar (Freeze) ────────────────────────────────────────────────────
+// ── Congelar (Freeze) ─────────────────────────────────────────────────────
 function toggleFreeze() {
   isFrozen = !isFrozen;
   const btn = document.getElementById('btn-freeze');
@@ -1116,7 +1263,7 @@ function closeSelectionTab() {
   switchTab('live');
 }
 
-// ── Seleção Manual de Texto (Select to Search) ───────────────────────────
+// ── Seleção Manual de Texto (Select to Search) ────────────────────────────
 function checkTextSelection() {
   const sel = window.getSelection();
   const text = sel ? sel.toString().trim() : '';
@@ -1127,8 +1274,6 @@ function checkTextSelection() {
     const preview = text.length > 55 ? text.substring(0, 52) + '...' : text;
     document.getElementById('sel-preview').textContent = `"${preview}"`;
     bar.style.display = 'flex';
-  } else {
-    // Não limpa imediatamente se o usuário clicar no botão da barra
   }
 }
 
@@ -1146,7 +1291,6 @@ async function searchSelectedText() {
   const thresh = Number(document.getElementById('thresh-slider').value) / 100;
   document.getElementById('selection-banner-query').textContent = `Busca: "${textToSearch.substring(0, 40)}..."`;
 
-  // Abre aba de seleção
   document.getElementById('tab-btn-selection').style.display = '';
   switchTab('selection');
   document.getElementById('selection-cards').innerHTML = '<div class="no-matches">A buscar versículos no índice semântico...</div>';
@@ -1166,7 +1310,68 @@ async function searchSelectedText() {
   }
 }
 
-// ── Estados UI Gerais ────────────────────────────────────────────────────
+// ── Modo de Teste por Digitação (Sem Whisper) ────────────────────────────
+async function sendSimulatedText() {
+  const input = document.getElementById('test-input');
+  const text = input.value.trim();
+  if (!text) return;
+
+  const accumulate = document.getElementById('test-accumulate').checked;
+  if (!accumulate) {
+    await clearBuffer();
+  }
+
+  input.value = '';
+
+  try {
+    const res = await fetch(`${API}/simulate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    }).then(r => r.json());
+
+    if (!res.ok) {
+      alert(res.error || 'Erro ao simular texto.');
+    }
+  } catch (err) {
+    console.error('[Simulate] Erro:', err);
+  }
+}
+
+async function sendDirectSearch() {
+  const input = document.getElementById('test-input');
+  const text = input.value.trim();
+  if (!text) return;
+
+  const thresh = Number(document.getElementById('thresh-slider').value) / 100;
+  document.getElementById('selection-banner-query').textContent = `Busca direta: "${text.substring(0, 40)}..."`;
+
+  document.getElementById('tab-btn-selection').style.display = '';
+  switchTab('selection');
+  document.getElementById('selection-cards').innerHTML = '<div class="no-matches">A buscar versículos no índice semântico...</div>';
+
+  try {
+    const res = await fetch(`${API}/search`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, threshold: thresh }),
+    }).then(r => r.json());
+
+    selectionMatches = res.results || [];
+    updateCounts();
+    renderSelection();
+  } catch (err) {
+    document.getElementById('selection-cards').innerHTML = `<div class="no-matches" style="color:var(--red)">Erro ao realizar busca: ${err.message}</div>`;
+  }
+}
+
+function applyPreset(text) {
+  const input = document.getElementById('test-input');
+  input.value = text;
+  sendSimulatedText();
+}
+
+// ── Estados UI Gerais ─────────────────────────────────────────────────────
 function onReady() {
   document.getElementById('loading-overlay').classList.add('hidden');
   setStatus('ready', 'Pronto');
@@ -1193,7 +1398,7 @@ function onCleared() {
   content.innerHTML = '';
   content.style.display = 'none';
   placeholder.style.display = '';
-  document.getElementById('buffer-count').textContent = '0 car. no buffer de áudio';
+  document.getElementById('buffer-count').textContent = '0 car. no buffer de contexto';
   liveMatches = [];
   lastLiveTime = null;
   updateCounts();
@@ -1228,7 +1433,7 @@ function setStatus(state, text) {
   document.getElementById('status-text').textContent = text;
 }
 
-// ── Inicialização ────────────────────────────────────────────────────────
+// ── Inicialização ─────────────────────────────────────────────────────────
 connectWS();
 pollInterval = setInterval(pollStatus, 2500);
 pollStatus();

@@ -7,6 +7,16 @@ Requisitos:
 Bíblias: descarregadas automaticamente na primeira utilização de cada versão.
 """
 
+import sys
+
+# Garante compatibilidade com UTF-8 no terminal Windows
+if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+        sys.stderr.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
 import asyncio
 import json
 import threading
@@ -16,14 +26,23 @@ from pathlib import Path
 from typing import Optional
 
 import numpy as np
-import sounddevice as sd
-import whisper
 import faiss
 import requests
 from sentence_transformers import SentenceTransformer
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 import uvicorn
+
+# Importações opcionais/resilientes para áudio e transcrição
+try:
+    import whisper
+except ImportError:
+    whisper = None
+
+try:
+    import sounddevice as sd
+except Exception:
+    sd = None
 
 # ---------------------------------------------------------------------------
 # CONFIGURAÇÕES GERAIS
@@ -190,10 +209,10 @@ class BibleRadar:
     # ── Carregamento ─────────────────────────────────────────────────────────
 
     def load_models(self):
-        self.loading_status = "A carregar Whisper..."
-        self.whisper_model  = whisper.load_model(WHISPER_MODEL)
-
-        self.loading_status = "A carregar modelo de embeddings..."
+        # NOTA: O modelo Whisper NÃO é carregado no arranque para evitar sobrecarregar
+        # a CPU/RAM e permitir o modo de teste por digitação imediato e leve.
+        # Ele só é carregado sob demanda se o utilizador clicar em 'Iniciar escuta'.
+        self.loading_status = "A carregar modelo semântico de embeddings..."
         self.embed_model    = SentenceTransformer(
             "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
         )
@@ -204,8 +223,8 @@ class BibleRadar:
         self.active_versions.add(default)
 
         self.ready          = True
-        self.loading_status = "Pronto"
-        print("[BibleRadar] ✅ Pronto!")
+        self.loading_status = "Pronto (Modo de Teste / Digitação ativo)"
+        print("[BibleRadar] ✅ Pronto! Pesquisa semântica carregada com sucesso.")
 
     def _load_version_sync(self, version_id: str):
         """Carrega e indexa uma versão (bloqueante — usar em thread)."""
@@ -236,7 +255,7 @@ class BibleRadar:
     def disable_version(self, version_id: str):
         self.active_versions.discard(version_id)
 
-    # ── Busca ────────────────────────────────────────────────────────────────
+    # ── Busca ─────────────────────────────────────────────────────────────
 
     def search(self, text: str, threshold: Optional[float] = None, top_k: int = TOP_K) -> list[dict]:
         min_thresh = threshold if threshold is not None else self.similarity_threshold
@@ -260,6 +279,67 @@ class BibleRadar:
         all_results.sort(key=lambda x: x["score"], reverse=True)
         return all_results[:top_k]
 
+    # ── Pipeline Unificado de Processamento de Texto ───────────────────────
+
+    def process_text_chunk(self, text: str) -> list[dict]:
+        """
+        Processa um bloco de texto (seja vindo da transcrição Whisper ou da digitação manual de teste).
+        Atualiza o buffer de transcrição, executa busca com múltiplas janelas (curta + ampla)
+        e notifica os clientes conectados via WebSocket.
+        """
+        text = text.strip()
+        if not text:
+            return []
+
+        self.transcript_buffer = (
+            self.transcript_buffer + " " + text
+        ).strip()
+
+        # Multi-window search:
+        # 1. Janela curta (últimos ~180 caracteres) para citações diretas
+        # 2. Janela ampla (últimos context_window caracteres) para passagens longas e contexto
+        short_len = 180
+        text_short = self.transcript_buffer[-short_len:].strip()
+        text_long  = self.transcript_buffer[-self.context_window:].strip()
+
+        combined_matches: dict[tuple, dict] = {}
+
+        matches_short = self.search(text_short)
+        for m in matches_short:
+            key = (m["version"], m["ref"])
+            combined_matches[key] = m
+
+        if text_long != text_short:
+            matches_long = self.search(text_long)
+            for m in matches_long:
+                key = (m["version"], m["ref"])
+                if key not in combined_matches or m["score"] > combined_matches[key]["score"]:
+                    combined_matches[key] = m
+
+        matches = sorted(
+            combined_matches.values(),
+            key=lambda x: x["score"],
+            reverse=True
+        )[:TOP_K]
+
+        # Notifica WebSocket se o loop assíncrono estiver ativo
+        if main_loop is not None:
+            try:
+                asyncio.run_coroutine_threadsafe(
+                    self.broadcast({
+                        "type": "update",
+                        "transcript": text,
+                        "fullBuffer": self.transcript_buffer[-1000:],
+                        "matches": matches,
+                        "timestamp": time.time(),
+                    }),
+                    main_loop,
+                )
+            except Exception as exc:
+                print(f"[WebSocket] Erro no envio: {exc}")
+
+        return matches
+
     # ── WebSocket broadcast ──────────────────────────────────────────────────
 
     async def broadcast(self, msg: dict):
@@ -279,7 +359,7 @@ app   = FastAPI()
 main_loop = None
 
 # ---------------------------------------------------------------------------
-# ÁUDIO + TRANSCRIÇÃO
+# ÁUDIO + TRANSCRIÇÃO (OPCIONAL SOB DEMANDA)
 # ---------------------------------------------------------------------------
 
 def audio_callback(indata, frames, time_info, status):
@@ -334,53 +414,7 @@ def transcription_loop():
         if not text:
             continue
 
-        radar.transcript_buffer = (
-            radar.transcript_buffer + " " + text
-        ).strip()
-
-        # Multi-window search:
-        # 1. Janela curta (últimos ~180 caracteres) para citações diretas
-        # 2. Janela ampla (últimos context_window caracteres) para passagens longas e contexto
-        short_len = 180
-        text_short = radar.transcript_buffer[-short_len:].strip()
-        text_long  = radar.transcript_buffer[-radar.context_window:].strip()
-
-        combined_matches: dict[tuple, dict] = {}
-
-        matches_short = radar.search(text_short)
-        for m in matches_short:
-            key = (m["version"], m["ref"])
-            combined_matches[key] = m
-
-        if text_long != text_short:
-            matches_long = radar.search(text_long)
-            for m in matches_long:
-                key = (m["version"], m["ref"])
-                if key not in combined_matches or m["score"] > combined_matches[key]["score"]:
-                    combined_matches[key] = m
-
-        matches = sorted(
-            combined_matches.values(),
-            key=lambda x: x["score"],
-            reverse=True
-        )[:TOP_K]
-
-        if main_loop is not None:
-            future = asyncio.run_coroutine_threadsafe(
-                radar.broadcast({
-                    "type": "update",
-                    "transcript": text,
-                    "fullBuffer": radar.transcript_buffer[-1000:],
-                    "matches": matches,
-                    "timestamp": time.time(),
-                }),
-                main_loop,
-            )
-
-            try:
-                future.result(timeout=10)
-            except Exception as exc:
-                print(f"[WebSocket] Erro no envio: {exc}")
+        radar.process_text_chunk(text)
 
     print("[Transcricao] Thread terminada.")
 
@@ -402,12 +436,13 @@ async def startup():
 @app.get("/api/status")
 async def api_status():
     devices = []
-    try:
-        for i, d in enumerate(sd.query_devices()):
-            if d["max_input_channels"] > 0:
-                devices.append({"id": i, "name": d["name"]})
-    except Exception:
-        pass
+    if sd is not None:
+        try:
+            for i, d in enumerate(sd.query_devices()):
+                if d.get("max_input_channels", 0) > 0:
+                    devices.append({"id": i, "name": d["name"]})
+        except Exception:
+            pass
 
     versions_info = [
         {
@@ -423,6 +458,9 @@ async def api_status():
         "ready":               radar.ready,
         "loadingStatus":       radar.loading_status,
         "listening":           radar.is_listening,
+        "testMode":            True,
+        "whisperLoaded":       radar.whisper_model is not None,
+        "audioAvailable":      sd is not None and whisper is not None,
         "devices":             devices,
         "deviceIndex":         radar.device_index,
         "versions":            versions_info,
@@ -445,6 +483,32 @@ async def update_settings(body: dict):
         "ok": True,
         "similarityThreshold": radar.similarity_threshold,
         "contextWindow": radar.context_window,
+    }
+
+
+@app.post("/api/simulate")
+async def simulate_input(body: dict):
+    """
+    Endpoint para o Modo de Teste:
+    Recebe texto digitado pelo utilizador, processa no motor semântico
+    e emite o evento para a interface e WebSocket exatamente como se tivesse sido falado.
+    """
+    text = body.get("text", "").strip()
+    if not text:
+        return {"ok": False, "error": "Texto vazio.", "results": []}
+
+    if not radar.ready or radar.embed_model is None:
+        return {
+            "ok": False,
+            "error": f"Modelos ainda a carregar: {radar.loading_status}",
+            "results": [],
+        }
+
+    matches = radar.process_text_chunk(text)
+    return {
+        "ok": True,
+        "text": text,
+        "results": matches,
     }
 
 
@@ -495,6 +559,32 @@ async def start_listening(body: dict = {}):
             "error": "Já está a ouvir.",
         }
 
+    if whisper is None:
+        return {
+            "ok": False,
+            "error": "Biblioteca 'openai-whisper' não disponível no ambiente.",
+        }
+
+    if sd is None:
+        return {
+            "ok": False,
+            "error": "Biblioteca de áudio 'sounddevice' não disponível.",
+        }
+
+    # Carrega Whisper sob demanda se ainda não estiver carregado
+    if radar.whisper_model is None:
+        radar.loading_status = f"A carregar Whisper '{WHISPER_MODEL}'..."
+        print(f"[BibleRadar] A carregar modelo Whisper '{WHISPER_MODEL}' sob demanda...")
+        try:
+            radar.whisper_model = whisper.load_model(WHISPER_MODEL)
+            radar.loading_status = "Pronto"
+        except Exception as exc:
+            radar.loading_status = "Erro ao carregar Whisper"
+            return {
+                "ok": False,
+                "error": f"Erro ao carregar Whisper: {exc}. Considere usar o Modo de Teste por texto.",
+            }
+
     device_id = body.get("deviceId", None)
 
     try:
@@ -502,7 +592,7 @@ async def start_listening(body: dict = {}):
             device_id = int(device_id)
             info = sd.query_devices(device_id)
 
-            if info["max_input_channels"] < 1:
+            if info.get("max_input_channels", 0) < 1:
                 return {
                     "ok": False,
                     "error": "O dispositivo selecionado não tem entrada de áudio.",
@@ -607,9 +697,63 @@ async def index():
     return FileResponse("index.html")
 
 
+def run_cli_interactive():
+    """Modo interativo direto no terminal para testar sem navegador e sem Whisper."""
+    print("\n" + "=" * 60)
+    print("  BibleRadar — Modo de Teste no Terminal (Sem Whisper)")
+    print("=" * 60)
+    print("A inicializar modelo semântico...")
+    radar.load_models()
+
+    print("\nPronto! Digite frases, temas ou versículos para testar.")
+    print("Comandos especiais:")
+    print("  'sair'       -> encerra o teste")
+    print("  'limpar'     -> limpa o buffer de contexto")
+    print("  'thresh 0.7' -> ajusta o limiar de similaridade (ex: 0.6 a 0.8)")
+    print("-" * 60 + "\n")
+
+    while True:
+        try:
+            line = input("Texto para testar > ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\nA encerrar.")
+            break
+
+        if not line:
+            continue
+        if line.lower() in ("sair", "exit", "quit"):
+            break
+        if line.lower() == "limpar":
+            radar.transcript_buffer = ""
+            print("[Buffer limpo.]\n")
+            continue
+        if line.lower().startswith("thresh "):
+            try:
+                val = float(line.split()[1])
+                radar.similarity_threshold = val
+                print(f"[Threshold ajustado para {val}]\n")
+            except Exception:
+                print("[Uso: thresh 0.7]\n")
+            continue
+
+        matches = radar.process_text_chunk(line)
+        print(f"\n--- Resultados ({len(matches)} encontrados) ---")
+        if not matches:
+            print("  (Nenhum versículo atingiu o limiar de similaridade configurado)")
+        for i, m in enumerate(matches, 1):
+            score_pct = int(m['score'] * 100)
+            print(f" {i}. [{score_pct}%] {m['ref']} ({m['version'].upper()})")
+            print(f"    \"{m['text']}\"\n")
+
+
 if __name__ == "__main__":
-    print("\n" + "=" * 55)
-    print("  BibleRadar pronto!")
-    print("  Acesse no browser: http://127.0.0.1:7890")
-    print("=" * 55 + "\n")
-    uvicorn.run(app, host="127.0.0.1", port=7890, log_level="info")
+    if "--cli" in sys.argv:
+        run_cli_interactive()
+    else:
+        print("\n" + "=" * 55)
+        print("  BibleRadar pronto!")
+        print("  Modo de Teste por Digitação disponível na interface.")
+        print("  Acesse no browser: http://127.0.0.1:7890")
+        print("  (Ou execute 'python server.py --cli' para teste no terminal)")
+        print("=" * 55 + "\n")
+        uvicorn.run(app, host="127.0.0.1", port=7890, log_level="info")
